@@ -8,7 +8,7 @@ services:
     dockerContext: ./backend
     dockerfilePath: ./backend/Dockerfile
     healthCheckPath: /api/health/
-    startCommand: >-
+    dockerCommand: >-
       sh -c "python manage.py migrate --noinput && python manage.py createcachetable &&
       exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-10000} --workers 1 --timeout 60"
     envVars:
