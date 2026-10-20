@@ -3,7 +3,7 @@ services:
     name: pesatrack-staging-api
     runtime: docker
     plan: free
-    region: frankfurt
+    region: singapore
     branch: master
     dockerContext: ./backend
     dockerfilePath: ./backend/Dockerfile

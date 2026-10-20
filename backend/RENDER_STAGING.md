@@ -23,9 +23,12 @@ PostgreSQL data model.
 
 ## One-time setup
 
-1. In Neon, create a PostgreSQL project in Frankfurt (`eu-central-1`) and copy
-   the **pooled** connection URL. Keep `sslmode=require` in the URL. Do not put
-   the database URL into this repository or chat.
+1. In the Neon project you created in Singapore, create a child branch named
+   `staging` from the `production` branch. This keeps staging records separate.
+   Open **Connect**, select the `staging` branch, and copy the **pooled** Postgres
+   connection URL. Keep `sslmode=require` in the URL. Do not put the database
+   URL into this repository or chat. The Render API is configured for Singapore
+   too, keeping database requests in the same region.
 2. In Render, connect the GitHub repository `Pmemphis/PesaTrack` and create a
    Blueprint from the repository's root `render.yaml`. Choose the Free plan.
    Render will prompt for `SECRET_KEY` and `DATABASE_URL` because the Blueprint
