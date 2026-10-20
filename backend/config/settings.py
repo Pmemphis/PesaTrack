@@ -29,12 +29,10 @@ if not SECRET_KEY:
 if not DEBUG and len(SECRET_KEY) < 50:
     raise ImproperlyConfigured("Use a generated SECRET_KEY with at least 50 characters in production.")
 
-fly_app_name = os.getenv("FLY_APP_NAME", "").strip()
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
     "localhost,127.0.0.1,testserver"
-    if DEBUG
-    else f"{fly_app_name}.fly.dev" if fly_app_name else "",
+    if DEBUG else "",
 )
 if not DEBUG and not ALLOWED_HOSTS:
     raise ImproperlyConfigured("Set ALLOWED_HOSTS when DJANGO_DEBUG is false.")
@@ -196,14 +194,14 @@ REST_FRAMEWORK = {
         "registration": "5/hour",
         "oauth": "20/hour",
     },
-    "NUM_PROXIES": 1 if not DEBUG else 0,
+    "NUM_PROXIES": int(os.getenv("NUM_PROXIES", "1" if not DEBUG else "0")),
 }
 
 TOKEN_TTL_DAYS = int(os.getenv("TOKEN_TTL_DAYS", "30"))
 if TOKEN_TTL_DAYS < 1:
     raise ImproperlyConfigured("TOKEN_TTL_DAYS must be at least 1.")
 
-# Database-backed cache entries are shared by all running Fly Machines.
+# Database-backed cache entries are shared by all running application instances.
 CACHES = {
     "default": {
         "BACKEND": (

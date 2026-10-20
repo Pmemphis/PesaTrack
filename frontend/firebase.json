@@ -1,6 +1,6 @@
 {
   "hosting": {
-    "site": "pesatrack-staging-pmemphis",
+    "site": "pesatrack-22172",
     "public": "dist",
     "ignore": [
       "firebase.json",
@@ -8,6 +8,14 @@
       "**/node_modules/**"
     ],
     "rewrites": [
+      {
+        "source": "/api/**",
+        "run": {
+          "serviceId": "pesatrack-staging-api",
+          "region": "europe-west1",
+          "pinTag": true
+        }
+      },
       {
         "source": "**",
         "destination": "/index.html"

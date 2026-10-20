@@ -44,25 +44,17 @@ in Account settings.
 
 ## Staging deployment
 
-The repository includes `fly.staging.toml`, a backend Dockerfile and Firebase
-Hosting configuration for the staging hostnames `pesatrack-staging-pmemphis`.
-Create the Firebase Hosting site in a Firebase project you control, then select
-that project when deploying. Create the Fly app and Managed Postgres cluster
-in your Fly.io account (Managed Postgres is a billed resource). Attach the
-database so Fly provides `DATABASE_URL`. Set `SECRET_KEY` and OAuth credentials
-as Fly secrets; do not put them in either checked-in TOML file. Use separate
-staging OAuth applications so local callback settings remain intact. Configure
-the staging GitHub OAuth app with this callback URL and add both staging
-callbacks to the Google OAuth client after the staging API exists:
+Staging is configured for Firebase Hosting and Cloud Run in
+`frontend/firebase.json` and `backend/cloudrun.staging.env.yaml`. The frontend
+and API share the Firebase origin `https://pesatrack-22172.web.app`; Hosting
+routes `/api/**` to Cloud Run. The backend deployment, PostgreSQL setup, secrets,
+and staging steps are documented in `backend/CLOUD_RUN_STAGING.md`. Use separate
+staging OAuth applications so local callback settings remain intact. Their
+callback URLs are:
 
-- Google: `https://pesatrack-staging-pmemphis.fly.dev/api/auth/google/callback/`
-- GitHub: `https://pesatrack-staging-pmemphis.fly.dev/api/auth/github/callback/`
+- Google: `https://pesatrack-22172.web.app/api/auth/google/callback/`
+- GitHub: `https://pesatrack-22172.web.app/api/auth/github/callback/`
 
-Build the frontend from `frontend/` with `npm run build:staging`; its checked-in
-`.env.staging` points to the staging API. Deploy that build to the configured
-Firebase site. Deploy the backend from `backend/` with
-`fly deploy --config fly.staging.toml`. Fly runs database migrations and
-creates the shared throttle cache table before each release. The API token
-lifetime defaults to 30 days. Authentication routes also use scoped request
-throttles; those are basic abuse controls, not a replacement for a managed
-edge firewall or monitoring.
+The API token lifetime defaults to 30 days. Authentication routes also use
+scoped request throttles; these are basic abuse controls, not a replacement for
+a managed edge firewall or monitoring.
