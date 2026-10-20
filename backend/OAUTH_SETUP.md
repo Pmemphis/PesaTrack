@@ -21,9 +21,16 @@ The frontend reads its public backend address from `frontend/.env` using
 the built-in `http://127.0.0.1:8000` default, then restart Vite after changing
 the value.
 
-For deployment, set `BACKEND_PUBLIC_URL` and `FRONTEND_PUBLIC_URL` to the
-deployed HTTPS origins and register each matching HTTPS callback URL with its
-provider. Provider callback URLs must match exactly.
+For staging, set `BACKEND_PUBLIC_URL` to
+`https://pesatrack-staging-api.onrender.com` and `FRONTEND_PUBLIC_URL` to
+`https://pesatrack-22172.web.app`. Register these exact callback URLs in the
+staging OAuth applications:
+
+- Google: `https://pesatrack-staging-api.onrender.com/api/auth/google/callback/`
+- GitHub: `https://pesatrack-staging-api.onrender.com/api/auth/github/callback/`
+
+Provider callback URLs must match exactly. Set the four provider variables in
+the Render service's environment settings; do not commit OAuth secrets.
 
 For a public deployment, set `DJANGO_DEBUG=False`, a generated private
 `SECRET_KEY`, and the deployed host in `ALLOWED_HOSTS`. Set the frontend HTTPS
@@ -34,7 +41,8 @@ secret placeholder as a real key.
 
 If TLS terminates at a reverse proxy, set `TRUST_X_FORWARDED_PROTO=True` only
 when that proxy overwrites `X-Forwarded-Proto` and does not pass through a
-client-supplied value. For direct HTTPS hosting, leave it unset.
+client-supplied value. The Render staging Blueprint configures this for its
+proxy.
 
 The backend verifies provider emails, but identifies returning OAuth accounts
 using Google's stable subject ID or GitHub's numeric account ID. It never
@@ -44,16 +52,10 @@ in Account settings.
 
 ## Staging deployment
 
-Staging is configured for Firebase Hosting and Cloud Run in
-`frontend/firebase.json` and `backend/cloudrun.staging.env.yaml`. The frontend
-and API share the Firebase origin `https://pesatrack-22172.web.app`; Hosting
-routes `/api/**` to Cloud Run. The backend deployment, PostgreSQL setup, secrets,
-and staging steps are documented in `backend/CLOUD_RUN_STAGING.md`. Use separate
-staging OAuth applications so local callback settings remain intact. Their
-callback URLs are:
-
-- Google: `https://pesatrack-22172.web.app/api/auth/google/callback/`
-- GitHub: `https://pesatrack-22172.web.app/api/auth/github/callback/`
+The no-billing staging setup uses Firebase Hosting for the frontend, Render for
+the Django API, and Neon for PostgreSQL. Full account setup and deployment steps
+are in `backend/RENDER_STAGING.md`. Use separate staging OAuth applications so
+local callback settings remain intact.
 
 The API token lifetime defaults to 30 days. Authentication routes also use
 scoped request throttles; these are basic abuse controls, not a replacement for

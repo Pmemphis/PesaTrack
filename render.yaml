@@ -1,0 +1,36 @@
+services:
+  - type: web
+    name: pesatrack-staging-api
+    runtime: docker
+    plan: free
+    region: frankfurt
+    branch: master
+    dockerContext: ./backend
+    dockerfilePath: ./backend/Dockerfile
+    healthCheckPath: /api/health/
+    startCommand: >-
+      sh -c "python manage.py migrate --noinput && python manage.py createcachetable &&
+      exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-10000} --workers 1 --timeout 60"
+    envVars:
+      - key: DJANGO_DEBUG
+        value: "false"
+      - key: SECRET_KEY
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_HOSTS
+        value: pesatrack-staging-api.onrender.com
+      - key: CORS_ALLOWED_ORIGINS
+        value: https://pesatrack-22172.web.app,https://pesatrack-22172.firebaseapp.com
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://pesatrack-22172.web.app,https://pesatrack-22172.firebaseapp.com
+      - key: BACKEND_PUBLIC_URL
+        value: https://pesatrack-staging-api.onrender.com
+      - key: FRONTEND_PUBLIC_URL
+        value: https://pesatrack-22172.web.app
+      - key: TOKEN_TTL_DAYS
+        value: "30"
+      - key: TRUST_X_FORWARDED_PROTO
+        value: "true"
+      - key: NUM_PROXIES
+        value: "1"

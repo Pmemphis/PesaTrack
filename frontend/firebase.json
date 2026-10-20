@@ -9,14 +9,6 @@
     ],
     "rewrites": [
       {
-        "source": "/api/**",
-        "run": {
-          "serviceId": "pesatrack-staging-api",
-          "region": "europe-west1",
-          "pinTag": true
-        }
-      },
-      {
         "source": "**",
         "destination": "/index.html"
       }
