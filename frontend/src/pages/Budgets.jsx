@@ -4,6 +4,7 @@ import { NavLink } from "react-router-dom";
 import "../App.css";
 import { useTransactions } from "../context/TransactionContext";
 import AccountPanel from "../components/AccountPanel";
+import { useAuth } from "../context/useAuth";
 
 const CATEGORY_OPTIONS = [
   "Food",
@@ -89,7 +90,15 @@ function getCategoryIcon(category) {
   return icons[getCategoryKey(category)] || "💰";
 }
 
+function userInitials(user) {
+  return [user?.first_name, user?.last_name]
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase())
+    .join("") || user?.email?.[0]?.toUpperCase() || "?";
+}
+
 function Budgets() {
+  const { user } = useAuth();
   const {
     transactions = [],
     budgets = [],
@@ -303,44 +312,74 @@ function Budgets() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell budgets-page">
       <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-icon">P</div>
+        <NavLink className="brand" to="/">
+          <span className="brand-icon">P</span>
+          <span>
+            PesaTrack<span className="brand-dot">.</span>
+          </span>
+        </NavLink>
 
-          <div>
-            <h2>PesaTrack</h2>
-            <span>Personal Finance</span>
-          </div>
-        </div>
+        <p className="nav-heading">WORKSPACE</p>
 
         <nav className="navigation">
-          <NavLink to="/" end className="nav-link">
-            <span>📊</span> Dashboard
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <span className="nav-icon">⌂</span> Dashboard
           </NavLink>
 
-          <NavLink to="/transactions" className="nav-link">
-            <span>💳</span> Transactions
+          <NavLink
+            to="/transactions"
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <span className="nav-icon">⇄</span> Transactions
           </NavLink>
 
-          <NavLink to="/budgets" className="nav-link">
-            <span>🎯</span> Budgets
+          <NavLink
+            to="/budgets"
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <span className="nav-icon">▤</span> Budgets
           </NavLink>
 
-          <NavLink to="/savings" className="nav-link">
-            <span>🐷</span> Savings
+          <NavLink
+            to="/savings"
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <span className="nav-icon">◎</span> Savings
           </NavLink>
         </nav>
 
-        <AccountPanel />
+        <div className="sidebar-bottom">
+          <div className="help-card">
+            <span className="help-icon">✦</span>
+            <strong>Your money, your future.</strong>
+            <p>Small steps today. Better finances tomorrow.</p>
+          </div>
+          <AccountPanel />
+        </div>
       </aside>
 
       <main className="main-content">
-        <header className="page-header">
+        <header className="topbar">
+          <div className="breadcrumb">
+            Workspace <span>/</span> Budgets
+          </div>
+          <div className="topbar-right">
+            <span className="demo-badge">ACCOUNT DATA</span>
+            <div className="avatar small-avatar">{userInitials(user)}</div>
+          </div>
+        </header>
+
+        <section className="page-heading">
           <div>
             <p className="eyebrow">PLAN WITH PURPOSE</p>
             <h1>Budgets</h1>
-            <p className="page-description">
+            <p className="muted">
               Set spending limits and stay in control of your money.
             </p>
           </div>
@@ -354,13 +393,13 @@ function Budgets() {
               onChange={(event) => handleMonthChange(event.target.value)}
             />
           </div>
-        </header>
+        </section>
 
         <section className="summary-grid budget-summary-grid">
           <article className="summary-card">
-            <div className="summary-card-top">
+            <div className="card-top">
               <span>Total budget</span>
-              <span className="summary-icon">🎯</span>
+              <span className="card-icon balance-icon">🎯</span>
             </div>
             <h2>{formatMoney(totalBudget)}</h2>
             <p>
@@ -370,18 +409,18 @@ function Budgets() {
           </article>
 
           <article className="summary-card">
-            <div className="summary-card-top">
+            <div className="card-top">
               <span>Total spent</span>
-              <span className="summary-icon">💸</span>
+              <span className="card-icon expense-icon">💸</span>
             </div>
             <h2>{formatMoney(totalSpent)}</h2>
             <p>All expenses for {formatMonth(selectedMonth)}</p>
           </article>
 
           <article className="summary-card">
-            <div className="summary-card-top">
+            <div className="card-top">
               <span>Budget remaining</span>
-              <span className="summary-icon">💰</span>
+              <span className="card-icon income-icon">💰</span>
             </div>
             <h2 className={totalRemaining < 0 ? "negative-value" : ""}>
               {formatMoney(totalRemaining)}
@@ -390,9 +429,9 @@ function Budgets() {
           </article>
 
           <article className="summary-card">
-            <div className="summary-card-top">
+            <div className="card-top">
               <span>Over budget</span>
-              <span className="summary-icon">⚠️</span>
+              <span className="card-icon expense-icon">⚠️</span>
             </div>
             <h2>{overBudgetCount}</h2>
             <p>
@@ -405,7 +444,7 @@ function Budgets() {
 
         <section className="budgets-layout">
           <div className="panel budget-form-panel">
-            <div className="panel-header">
+            <div className="panel-heading budget-panel-heading">
               <div>
                 <h2>{editingId !== null ? "Edit budget" : "Create a budget"}</h2>
                 <p>
@@ -459,18 +498,6 @@ function Budgets() {
                 />
               </div>
 
-              <div className="form-group">
-                <label htmlFor="budget-form-month">Month</label>
-
-                <input
-                  id="budget-form-month"
-                  type="month"
-                  value={selectedMonth}
-                  onChange={(event) => handleMonthChange(event.target.value)}
-                  required
-                />
-              </div>
-
               {(error || budgetError) && (
                 <p className="budget-error" role="alert">
                   {error || "There is a problem with your budgets. Please refresh and try again."}
@@ -505,7 +532,7 @@ function Budgets() {
           </div>
 
           <div className="panel budget-list-panel">
-            <div className="panel-header">
+            <div className="panel-heading budget-panel-heading">
               <div>
                 <h2>Budget breakdown</h2>
                 <p>{formatMonth(selectedMonth)}</p>
@@ -645,7 +672,7 @@ function Budgets() {
           </div>
         </section>
 
-        <footer className="page-footer">
+        <footer className="footer">
           <span>PesaTrack · Personal Finance</span>
           <span>Budgets synced with your account</span>
         </footer>

@@ -4,6 +4,7 @@ import { NavLink } from "react-router-dom";
 import "../App.css";
 import { useTransactions } from "../context/TransactionContext";
 import AccountPanel from "../components/AccountPanel";
+import { useAuth } from "../context/useAuth";
 
 const GOAL_CATEGORIES = [
   { label: "Emergency fund", icon: "🛟" },
@@ -63,7 +64,15 @@ function getGoalIcon(category) {
   );
 }
 
+function userInitials(user) {
+  return [user?.first_name, user?.last_name]
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase())
+    .join("") || user?.email?.[0]?.toUpperCase() || "?";
+}
+
 function Savings() {
+  const { user } = useAuth();
   const {
     savingsGoals = [],
     legacySavingsGoals = [],
@@ -337,75 +346,109 @@ function Savings() {
   }
 
   return (
-    <div className="app-shell">
+    <div className="app-shell savings-page">
       <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-icon">P</div>
-          <div>
-            <h2>PesaTrack</h2>
-            <span>Personal Finance</span>
-          </div>
-        </div>
+        <NavLink className="brand" to="/">
+          <span className="brand-icon">P</span>
+          <span>
+            PesaTrack<span className="brand-dot">.</span>
+          </span>
+        </NavLink>
+
+        <p className="nav-heading">WORKSPACE</p>
 
         <nav className="navigation">
-          <NavLink to="/" end className="nav-link">
-            <span>📊</span> Dashboard
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <span className="nav-icon">⌂</span> Dashboard
           </NavLink>
 
-          <NavLink to="/transactions" className="nav-link">
-            <span>💳</span> Transactions
+          <NavLink
+            to="/transactions"
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <span className="nav-icon">⇄</span> Transactions
           </NavLink>
 
-          <NavLink to="/budgets" className="nav-link">
-            <span>🎯</span> Budgets
+          <NavLink
+            to="/budgets"
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <span className="nav-icon">▤</span> Budgets
           </NavLink>
 
-          <NavLink to="/savings" className="nav-link">
-            <span>🐷</span> Savings
+          <NavLink
+            to="/savings"
+            className={({ isActive }) => `nav-link${isActive ? " active" : ""}`}
+          >
+            <span className="nav-icon">◎</span> Savings
           </NavLink>
         </nav>
 
-        <AccountPanel />
+        <div className="sidebar-bottom">
+          <div className="help-card">
+            <span className="help-icon">✦</span>
+            <strong>Your money, your future.</strong>
+            <p>Small steps today. Better finances tomorrow.</p>
+          </div>
+          <AccountPanel />
+        </div>
       </aside>
 
       <main className="main-content">
-        <header className="page-header">
+        <header className="topbar">
+          <div className="breadcrumb">
+            Workspace <span>/</span> Savings
+          </div>
+          <div className="topbar-right">
+            <span className="demo-badge">ACCOUNT DATA</span>
+            <div className="avatar small-avatar">{userInitials(user)}</div>
+          </div>
+        </header>
+
+        <section className="page-heading">
           <div>
             <p className="eyebrow">BUILD YOUR FUTURE</p>
             <h1>Savings Goals</h1>
-            <p className="page-description">
+            <p className="muted">
               Turn your plans into goals and track every contribution.
             </p>
           </div>
 
-          <a className="savings-header-link" href="#create-savings-goal">
-            + New goal
+          <a
+            className="primary-button"
+            href="#create-savings-goal"
+          >
+            <span>＋</span> New goal
           </a>
-        </header>
+        </section>
 
         <section className="summary-grid savings-summary-grid">
           <article className="summary-card">
-            <div className="summary-card-top">
+            <div className="card-top">
               <span>Total saved</span>
-              <span className="summary-icon">🐷</span>
+              <span className="card-icon savings-icon">🐷</span>
             </div>
             <h2>{formatMoney(totalSaved)}</h2>
             <p>Across all active and completed goals</p>
           </article>
 
           <article className="summary-card">
-            <div className="summary-card-top">
+            <div className="card-top">
               <span>Total targets</span>
-              <span className="summary-icon">🎯</span>
+              <span className="card-icon balance-icon">🎯</span>
             </div>
             <h2>{formatMoney(totalTargets)}</h2>
             <p>Combined goal amounts</p>
           </article>
 
           <article className="summary-card">
-            <div className="summary-card-top">
+            <div className="card-top">
               <span>Goals completed</span>
-              <span className="summary-icon">🏆</span>
+              <span className="card-icon income-icon">🏆</span>
             </div>
             <h2>
               {completedGoals} / {savingsGoals.length}
@@ -414,9 +457,9 @@ function Savings() {
           </article>
 
           <article className="summary-card">
-            <div className="summary-card-top">
+            <div className="card-top">
               <span>Still needed</span>
-              <span className="summary-icon">📈</span>
+              <span className="card-icon expense-icon">📈</span>
             </div>
             <h2>
               {formatMoney(
@@ -435,7 +478,7 @@ function Savings() {
             className="panel savings-form-panel"
             id="create-savings-goal"
           >
-            <div className="panel-header">
+            <div className="panel-heading savings-panel-heading">
               <div>
                 <h2>{editingId ? "Edit savings goal" : "Create a goal"}</h2>
                 <p>
@@ -553,7 +596,7 @@ function Savings() {
           </div>
 
           <div className="panel savings-goals-panel">
-            <div className="panel-header">
+            <div className="panel-heading savings-panel-heading">
               <div>
                 <h2>Your savings goals</h2>
                 <p>Keep moving toward what matters to you.</p>
@@ -1018,7 +1061,7 @@ function Savings() {
           </div>
         </section>
 
-        <footer className="page-footer">
+        <footer className="footer">
           <span>PesaTrack · Personal Finance</span>
           <span>Savings goals and contributions sync with your account</span>
         </footer>
