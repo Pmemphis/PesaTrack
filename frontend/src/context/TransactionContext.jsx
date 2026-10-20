@@ -11,52 +11,67 @@ import { apiRequest } from "../api";
 
 const TransactionContext = createContext(null);
 
-function loadFromStorage(key, fallback) {
+function loadLegacySavings() {
+  try {
+    const saved = localStorage.getItem("pesatrack_savings");
+    const parsed = saved ? JSON.parse(saved) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error("Could not read older browser savings data:", error);
+    return [];
+  }
+}
+
+function loadSavingsImportProgress(key) {
   try {
     const saved = localStorage.getItem(key);
-
-    if (saved !== null) {
-      const parsed = JSON.parse(saved);
-      if (Array.isArray(parsed)) return parsed;
-    }
+    const parsed = saved ? JSON.parse(saved) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed
+      : {};
   } catch (error) {
-    console.error(`Could not load ${key}:`, error);
+    console.error("Could not read savings import progress:", error);
+    return {};
   }
-
-  return fallback;
 }
 
-function createId() {
-  return crypto.randomUUID();
-}
-
-// Convert Django API records into the format used by the React frontend.
 function normalizeTransaction(transaction) {
+  return { ...transaction, amount: Number(transaction.amount) };
+}
+
+function normalizeBudget(budget) {
+  return { ...budget, amount: Number(budget.amount) };
+}
+
+function normalizeContribution(contribution) {
+  return { ...contribution, amount: Number(contribution.amount) };
+}
+
+function normalizeSavingsGoal(goal, contributions = []) {
   return {
-    ...transaction,
-    amount: Number(transaction.amount),
+    ...goal,
+    targetAmount: Number(goal.target_amount),
+    contributions: contributions.map(normalizeContribution),
   };
 }
 
 export function TransactionProvider({ children }) {
-  // Transactions now come from Django, not the local sample data.
   const [transactions, setTransactions] = useState([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
   const [transactionError, setTransactionError] = useState("");
 
-  // Budgets and savings remain local until their API integration.
-  const [budgets, setBudgets] = useState(() =>
-    loadFromStorage("pesatrack_budgets", [])
-  );
+  const [budgets, setBudgets] = useState([]);
+  const [isLoadingBudgets, setIsLoadingBudgets] = useState(false);
+  const [budgetError, setBudgetError] = useState("");
 
-  const [savingsGoals, setSavingsGoals] = useState(() =>
-    loadFromStorage("pesatrack_savings", [])
-  );
+  const [savingsGoals, setSavingsGoals] = useState([]);
+  const [legacySavingsGoals, setLegacySavingsGoals] =
+    useState(loadLegacySavings);
+  const [isLoadingSavingsGoals, setIsLoadingSavingsGoals] = useState(false);
+  const [savingsError, setSavingsError] = useState("");
 
   const refreshTransactions = useCallback(async () => {
-    const token = localStorage.getItem("pesatrack_token");
-
-    if (!token) {
+    if (!localStorage.getItem("pesatrack_token")) {
       setTransactions([]);
       setTransactionError("");
       setIsLoadingTransactions(false);
@@ -70,7 +85,7 @@ export function TransactionProvider({ children }) {
       const data = await apiRequest("/transactions/");
 
       if (!Array.isArray(data)) {
-        throw new Error("The transactions API returned an unexpected response.");
+        throw new Error("Unexpected transactions API response.");
       }
 
       setTransactions(data.map(normalizeTransaction));
@@ -82,49 +97,101 @@ export function TransactionProvider({ children }) {
     }
   }, []);
 
-  // Load server transactions when the provider starts.
+  const refreshBudgets = useCallback(async () => {
+    if (!localStorage.getItem("pesatrack_token")) {
+      setBudgets([]);
+      setBudgetError("");
+      setIsLoadingBudgets(false);
+      return;
+    }
+
+    setIsLoadingBudgets(true);
+    setBudgetError("");
+
+    try {
+      const data = await apiRequest("/budgets/");
+
+      if (!Array.isArray(data)) {
+        throw new Error("Unexpected budgets API response.");
+      }
+
+      setBudgets(data.map(normalizeBudget));
+    } catch (error) {
+      setBudgetError(error.message || "Could not load budgets.");
+      throw error;
+    } finally {
+      setIsLoadingBudgets(false);
+    }
+  }, []);
+
+  const refreshSavingsGoals = useCallback(async () => {
+    if (!localStorage.getItem("pesatrack_token")) {
+      setSavingsGoals([]);
+      setSavingsError("");
+      setIsLoadingSavingsGoals(false);
+      return;
+    }
+
+    setIsLoadingSavingsGoals(true);
+    setSavingsError("");
+
+    try {
+      const [goals, contributions] = await Promise.all([
+        apiRequest("/savings-goals/"),
+        apiRequest("/savings-contributions/"),
+      ]);
+
+      if (!Array.isArray(goals) || !Array.isArray(contributions)) {
+        throw new Error("Unexpected savings API response.");
+      }
+
+      setSavingsGoals(
+        goals.map((goal) =>
+          normalizeSavingsGoal(
+            goal,
+            contributions.filter(
+              (contribution) => String(contribution.goal) === String(goal.id)
+            )
+          )
+        )
+      );
+    } catch (error) {
+      setSavingsError(error.message || "Could not load savings goals.");
+      throw error;
+    } finally {
+      setIsLoadingSavingsGoals(false);
+    }
+  }, []);
+
+  const refreshAll = useCallback(async () => {
+    await Promise.all([
+      refreshTransactions(),
+      refreshBudgets(),
+      refreshSavingsGoals(),
+    ]);
+  }, [refreshTransactions, refreshBudgets, refreshSavingsGoals]);
+
   useEffect(() => {
     if (localStorage.getItem("pesatrack_token")) {
-      refreshTransactions().catch((error) => {
-        console.error("Could not load transactions:", error);
+      refreshAll().catch((error) => {
+        console.error("Could not load PesaTrack data:", error);
       });
     }
-  }, [refreshTransactions]);
+  }, [refreshAll]);
 
-  // Allow the login page to notify this provider when authentication changes.
   useEffect(() => {
     function handleAuthChange() {
-      refreshTransactions().catch((error) => {
-        console.error("Could not refresh transactions:", error);
+      refreshAll().catch((error) => {
+        console.error("Could not refresh PesaTrack data:", error);
       });
     }
 
     window.addEventListener("pesatrack-auth-change", handleAuthChange);
-
-    return () => {
+    return () =>
       window.removeEventListener("pesatrack-auth-change", handleAuthChange);
-    };
-  }, [refreshTransactions]);
+  }, [refreshAll]);
 
-  // Persist budgets locally for now.
-  useEffect(() => {
-    try {
-      localStorage.setItem("pesatrack_budgets", JSON.stringify(budgets));
-    } catch (error) {
-      console.error("Could not save budgets:", error);
-    }
-  }, [budgets]);
-
-  // Persist savings goals locally for now.
-  useEffect(() => {
-    try {
-      localStorage.setItem("pesatrack_savings", JSON.stringify(savingsGoals));
-    } catch (error) {
-      console.error("Could not save savings goals:", error);
-    }
-  }, [savingsGoals]);
-
-  // Transactions: Django REST API
+  // Transactions: Django API
   async function addTransaction(transaction) {
     const payload = {
       name: transaction.name.trim(),
@@ -152,111 +219,220 @@ export function TransactionProvider({ children }) {
   }
 
   async function deleteTransaction(id) {
-    await apiRequest(`/transactions/${id}/`, {
-      method: "DELETE",
-    });
+    await apiRequest(`/transactions/${id}/`, { method: "DELETE" });
 
     setTransactions((current) =>
-      current.filter((transaction) => String(transaction.id) !== String(id))
+      current.filter((item) => String(item.id) !== String(id))
     );
   }
 
-  // Budgets: localStorage for now
-  function saveBudget(budget) {
-    const normalizedBudget = {
-      ...budget,
+  // Budgets: Django API
+  async function saveBudget(budget) {
+    const payload = {
       category: budget.category.trim(),
+      month: budget.month,
       amount: Number(budget.amount),
     };
 
-    setBudgets((current) => {
-      const existing = current.find(
-        (item) =>
-          item.category.toLowerCase() ===
-            normalizedBudget.category.toLowerCase() &&
-          item.month === normalizedBudget.month
-      );
+    setBudgetError("");
 
-      if (existing) {
-        return current.map((item) =>
-          item.id === existing.id
-            ? { ...item, ...normalizedBudget, id: existing.id }
-            : item
-        );
+    try {
+      let saved;
+
+      if (budget.id !== undefined && budget.id !== null) {
+        saved = await apiRequest(`/budgets/${budget.id}/`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        saved = await apiRequest("/budgets/", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
       }
 
-      return [...current, { ...normalizedBudget, id: createId() }];
-    });
+      const normalized = normalizeBudget(saved);
+
+      setBudgets((current) => {
+        const exists = current.some(
+          (item) => String(item.id) === String(normalized.id)
+        );
+
+        if (exists) {
+          return current.map((item) =>
+            String(item.id) === String(normalized.id) ? normalized : item
+          );
+        }
+
+        return [...current, normalized];
+      });
+
+      return normalized;
+    } catch (error) {
+      setBudgetError(error.message || "Could not save budget.");
+      throw error;
+    }
   }
 
-  function deleteBudget(id) {
-    setBudgets((current) =>
-      current.filter((budget) => budget.id !== id)
-    );
+  async function deleteBudget(id) {
+    setBudgetError("");
+
+    try {
+      await apiRequest(`/budgets/${id}/`, { method: "DELETE" });
+
+      setBudgets((current) =>
+        current.filter((budget) => String(budget.id) !== String(id))
+      );
+    } catch (error) {
+      setBudgetError(error.message || "Could not delete budget.");
+      throw error;
+    }
   }
 
-  // Savings goals: localStorage for now
-  function saveSavingsGoal(goal) {
-    const normalizedGoal = {
-      ...goal,
+  // Savings goals and contribution history: Django API.
+  async function saveSavingsGoal(goal) {
+    const payload = {
       name: goal.name.trim(),
-      targetAmount: Number(goal.targetAmount),
-      contributions: Array.isArray(goal.contributions)
-        ? goal.contributions
-        : [],
+      category: goal.category,
+      target_amount: Number(goal.targetAmount),
+      deadline: goal.deadline || null,
+      description: goal.description.trim(),
     };
+
+    setSavingsError("");
+
+    const saved =
+      goal.id !== undefined && goal.id !== null
+        ? await apiRequest(`/savings-goals/${goal.id}/`, {
+            method: "PATCH",
+            body: JSON.stringify(payload),
+          })
+        : await apiRequest("/savings-goals/", {
+            method: "POST",
+            body: JSON.stringify(payload),
+          });
 
     setSavingsGoals((current) => {
-      const existing = current.find((item) => item.id === goal.id);
+      const existing = current.find(
+        (item) => String(item.id) === String(saved.id)
+      );
+      const normalized = normalizeSavingsGoal(
+        saved,
+        existing?.contributions || []
+      );
 
-      if (existing) {
-        return current.map((item) =>
-          item.id === goal.id
-            ? {
-                ...item,
-                ...normalizedGoal,
-                id: item.id,
-                contributions: item.contributions || [],
-              }
-            : item
-        );
-      }
-
-      return [
-        ...current,
-        { ...normalizedGoal, id: createId() },
-      ];
+      return existing
+        ? current.map((item) =>
+            String(item.id) === String(saved.id) ? normalized : item
+          )
+        : [...current, normalized];
     });
+
+    return saved;
   }
 
-  function addSavingsContribution(goalId, contribution) {
-    const newContribution = {
-      ...contribution,
-      id: createId(),
-      amount: Number(contribution.amount),
-    };
+  async function addSavingsContribution(goalId, contribution) {
+    setSavingsError("");
+
+    const saved = await apiRequest("/savings-contributions/", {
+      method: "POST",
+      body: JSON.stringify({
+        goal: goalId,
+        type: contribution.type,
+        amount: Number(contribution.amount),
+        date: contribution.date,
+        note: contribution.note.trim(),
+      }),
+    });
+    const normalized = normalizeContribution(saved);
 
     setSavingsGoals((current) =>
       current.map((goal) =>
-        goal.id === goalId
+        String(goal.id) === String(goalId)
           ? {
               ...goal,
-              contributions: [
-                ...(goal.contributions || []),
-                newContribution,
-              ],
+              contributions: [...(goal.contributions || []), normalized],
             }
           : goal
       )
     );
 
-    return newContribution;
+    return normalized;
   }
 
-  function deleteSavingsGoal(goalId) {
+  async function deleteSavingsGoal(goalId) {
+    setSavingsError("");
+
+    await apiRequest(`/savings-goals/${goalId}/`, { method: "DELETE" });
     setSavingsGoals((current) =>
-      current.filter((goal) => goal.id !== goalId)
+      current.filter((goal) => String(goal.id) !== String(goalId))
     );
+  }
+
+  async function importLegacySavingsGoals() {
+    const token = localStorage.getItem("pesatrack_token");
+    if (!token) throw new Error("Sign in before importing savings goals.");
+
+    const progressKey = `pesatrack_savings_import_${token}`;
+    const progress = loadSavingsImportProgress(progressKey);
+    setSavingsError("");
+
+    for (const [index, legacyGoal] of legacySavingsGoals.entries()) {
+      const legacyGoalId = String(
+        legacyGoal.id ?? `${legacyGoal.name}-${legacyGoal.targetAmount}-${index}`
+      );
+      const checkpoint = progress[legacyGoalId] || {
+        contributionIds: [],
+      };
+
+      if (checkpoint.goalId) {
+        await apiRequest(`/savings-goals/${checkpoint.goalId}/`);
+      } else {
+        const createdGoal = await apiRequest("/savings-goals/", {
+          method: "POST",
+          body: JSON.stringify({
+            name: String(legacyGoal.name || "Imported savings goal").trim(),
+            category: legacyGoal.category || "Personal",
+            target_amount: Number(
+              legacyGoal.targetAmount ?? legacyGoal.target_amount
+            ),
+            deadline: legacyGoal.deadline || null,
+            description: String(legacyGoal.description || ""),
+          }),
+        });
+        checkpoint.goalId = createdGoal.id;
+        checkpoint.contributionIds = checkpoint.contributionIds || [];
+        progress[legacyGoalId] = checkpoint;
+        localStorage.setItem(progressKey, JSON.stringify(progress));
+      }
+
+      for (const [contributionIndex, contribution] of (
+        legacyGoal.contributions || []
+      ).entries()) {
+        const contributionId = String(contribution.id ?? contributionIndex);
+        if (checkpoint.contributionIds.includes(contributionId)) continue;
+
+        await apiRequest("/savings-contributions/", {
+          method: "POST",
+          body: JSON.stringify({
+            goal: checkpoint.goalId,
+            type: contribution.type,
+            amount: Number(contribution.amount),
+            date: contribution.date,
+            note: String(contribution.note || ""),
+          }),
+        });
+
+        checkpoint.contributionIds.push(contributionId);
+        localStorage.setItem(progressKey, JSON.stringify(progress));
+      }
+    }
+
+    await refreshSavingsGoals();
+
+    localStorage.setItem("pesatrack_savings", JSON.stringify([]));
+    localStorage.removeItem(progressKey);
+    setLegacySavingsGoals([]);
   }
 
   return (
@@ -272,8 +448,16 @@ export function TransactionProvider({ children }) {
         budgets,
         saveBudget,
         deleteBudget,
+        refreshBudgets,
+        isLoadingBudgets,
+        budgetError,
 
         savingsGoals,
+        legacySavingsGoals,
+        isLoadingSavingsGoals,
+        savingsError,
+        refreshSavingsGoals,
+        importLegacySavingsGoals,
         saveSavingsGoal,
         addSavingsContribution,
         deleteSavingsGoal,
@@ -288,9 +472,7 @@ export function useTransactions() {
   const context = useContext(TransactionContext);
 
   if (!context) {
-    throw new Error(
-      "useTransactions must be used inside TransactionProvider"
-    );
+    throw new Error("useTransactions must be used inside TransactionProvider");
   }
 
   return context;

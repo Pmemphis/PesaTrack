@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 import "../App.css";
 import { useTransactions } from "../context/TransactionContext";
+import AccountPanel from "../components/AccountPanel";
 
 const GOAL_CATEGORIES = [
   { label: "Emergency fund", icon: "🛟" },
@@ -65,9 +66,13 @@ function getGoalIcon(category) {
 function Savings() {
   const {
     savingsGoals = [],
+    legacySavingsGoals = [],
     saveSavingsGoal,
     addSavingsContribution,
     deleteSavingsGoal,
+    importLegacySavingsGoals,
+    isLoadingSavingsGoals,
+    savingsError,
   } = useTransactions();
 
   const [name, setName] = useState("");
@@ -77,6 +82,11 @@ function Savings() {
   const [description, setDescription] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [formError, setFormError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [isSavingGoal, setIsSavingGoal] = useState(false);
+  const [deletingGoalId, setDeletingGoalId] = useState(null);
+  const [isImportingLegacyGoals, setIsImportingLegacyGoals] = useState(false);
+  const [legacyImportError, setLegacyImportError] = useState("");
 
   const [selectedGoalId, setSelectedGoalId] = useState(null);
   const [contributionType, setContributionType] = useState("deposit");
@@ -84,6 +94,7 @@ function Savings() {
   const [contributionDate, setContributionDate] = useState(todayString());
   const [contributionNote, setContributionNote] = useState("");
   const [contributionError, setContributionError] = useState("");
+  const [isSavingContribution, setIsSavingContribution] = useState(false);
 
   const [historyGoalId, setHistoryGoalId] = useState(null);
 
@@ -134,7 +145,7 @@ function Savings() {
     setFormError("");
   }
 
-  function handleSaveGoal(event) {
+  async function handleSaveGoal(event) {
     event.preventDefault();
     setFormError("");
 
@@ -161,16 +172,25 @@ function Savings() {
       return;
     }
 
-    saveSavingsGoal({
-      id: editingId || undefined,
-      name: cleanName,
-      category,
-      targetAmount: numericTarget,
-      deadline,
-      description: description.trim(),
-    });
+    setIsSavingGoal(true);
 
-    resetGoalForm();
+    try {
+      await saveSavingsGoal({
+        id: editingId ?? undefined,
+        name: cleanName,
+        category,
+        targetAmount: numericTarget,
+        deadline,
+        description: description.trim(),
+      });
+
+      resetGoalForm();
+    } catch (error) {
+      console.error("Savings goal save failed:", error);
+      setFormError("Could not save this goal. Check your connection and try again.");
+    } finally {
+      setIsSavingGoal(false);
+    }
   }
 
   function handleEditGoal(goal) {
@@ -188,25 +208,35 @@ function Savings() {
     });
   }
 
-  function handleDeleteGoal(goal) {
+  async function handleDeleteGoal(goal) {
     const confirmed = window.confirm(
       `Delete "${goal.name}" and its contribution history? This action cannot be undone.`
     );
 
     if (!confirmed) return;
 
-    deleteSavingsGoal(goal.id);
+    setDeletingGoalId(goal.id);
+    setActionError("");
 
-    if (editingId === goal.id) {
-      resetGoalForm();
-    }
+    try {
+      await deleteSavingsGoal(goal.id);
 
-    if (selectedGoalId === goal.id) {
-      setSelectedGoalId(null);
-    }
+      if (String(editingId) === String(goal.id)) {
+        resetGoalForm();
+      }
 
-    if (historyGoalId === goal.id) {
-      setHistoryGoalId(null);
+      if (String(selectedGoalId) === String(goal.id)) {
+        setSelectedGoalId(null);
+      }
+
+      if (String(historyGoalId) === String(goal.id)) {
+        setHistoryGoalId(null);
+      }
+    } catch (error) {
+      console.error("Savings goal deletion failed:", error);
+      setActionError("Could not delete this goal. Check your connection and try again.");
+    } finally {
+      setDeletingGoalId(null);
     }
   }
 
@@ -226,7 +256,31 @@ function Savings() {
     setContributionError("");
   }
 
-  function handleContributionSubmit(event) {
+  async function handleImportLegacyGoals() {
+    const confirmed = window.confirm(
+      `Import ${legacySavingsGoals.length} older savings goal${
+        legacySavingsGoals.length === 1 ? "" : "s"
+      } and all contribution history into the account you are signed in to?`
+    );
+
+    if (!confirmed) return;
+
+    setIsImportingLegacyGoals(true);
+    setLegacyImportError("");
+
+    try {
+      await importLegacySavingsGoals();
+    } catch (error) {
+      console.error("Legacy savings import failed:", error);
+      setLegacyImportError(
+        "Import did not finish. Your browser copy is still saved; check your connection and retry."
+      );
+    } finally {
+      setIsImportingLegacyGoals(false);
+    }
+  }
+
+  async function handleContributionSubmit(event) {
     event.preventDefault();
     setContributionError("");
 
@@ -261,14 +315,25 @@ function Savings() {
       return;
     }
 
-    addSavingsContribution(selectedGoal.id, {
-      type: contributionType,
-      amount: numericAmount,
-      date: contributionDate,
-      note: contributionNote.trim(),
-    });
+    setIsSavingContribution(true);
 
-    closeContributionForm();
+    try {
+      await addSavingsContribution(selectedGoal.id, {
+        type: contributionType,
+        amount: numericAmount,
+        date: contributionDate,
+        note: contributionNote.trim(),
+      });
+
+      closeContributionForm();
+    } catch (error) {
+      console.error("Savings contribution save failed:", error);
+      setContributionError(
+        "Could not save this contribution. Check your connection and try again."
+      );
+    } finally {
+      setIsSavingContribution(false);
+    }
   }
 
   return (
@@ -300,13 +365,7 @@ function Savings() {
           </NavLink>
         </nav>
 
-        <div className="sidebar-footer">
-          <div className="sidebar-avatar">PT</div>
-          <div>
-            <strong>My Finances</strong>
-            <span>Kenya · KES</span>
-          </div>
-        </div>
+        <AccountPanel />
       </aside>
 
       <main className="main-content">
@@ -467,8 +526,16 @@ function Savings() {
               )}
 
               <div className="savings-form-actions">
-                <button type="submit" className="primary-button">
-                  {editingId ? "Save changes" : "Create goal"}
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={isSavingGoal}
+                >
+                  {isSavingGoal
+                    ? "Saving..."
+                    : editingId
+                    ? "Save changes"
+                    : "Create goal"}
                 </button>
 
                 {editingId && (
@@ -476,6 +543,7 @@ function Savings() {
                     type="button"
                     className="secondary-button"
                     onClick={resetGoalForm}
+                    disabled={isSavingGoal}
                   >
                     Cancel
                   </button>
@@ -497,7 +565,25 @@ function Savings() {
               </span>
             </div>
 
-            {goalSummaries.length === 0 ? (
+            {actionError && (
+              <p className="savings-error" role="alert">
+                {actionError}
+              </p>
+            )}
+
+            {isLoadingSavingsGoals ? (
+              <div className="budget-empty-state">
+                <div className="empty-state-icon">⏳</div>
+                <h3>Loading savings goals...</h3>
+                <p>Fetching your goals and contribution history.</p>
+              </div>
+            ) : savingsError ? (
+              <div className="budget-empty-state">
+                <div className="empty-state-icon">⚠️</div>
+                <h3>Could not load savings goals</h3>
+                <p>Check your connection and refresh the page.</p>
+              </div>
+            ) : goalSummaries.length === 0 ? (
               <div className="budget-empty-state">
                 <div className="empty-state-icon">🐷</div>
                 <h3>Your first goal starts here</h3>
@@ -639,8 +725,11 @@ function Savings() {
                           type="button"
                           className="text-button delete-text-button"
                           onClick={() => handleDeleteGoal(goal)}
+                          disabled={deletingGoalId !== null}
                         >
-                          Delete
+                          {String(deletingGoalId) === String(goal.id)
+                            ? "Deleting..."
+                            : "Delete"}
                         </button>
                       </div>
                     </article>
@@ -651,11 +740,48 @@ function Savings() {
           </div>
         </section>
 
+        {legacySavingsGoals.length > 0 && (
+          <section className="panel legacy-savings-import">
+            <div>
+              <h2>Older browser savings data</h2>
+              <p>
+                {legacySavingsGoals.length} goal
+                {legacySavingsGoals.length === 1 ? " is" : "s are"} still saved
+                in this browser. Importing moves them and their contribution
+                history into the account you are signed in to. The browser copy
+                stays in place unless the import finishes successfully.
+              </p>
+              {legacyImportError && (
+                <p className="savings-error" role="alert">
+                  {legacyImportError}
+                </p>
+              )}
+            </div>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleImportLegacyGoals}
+              disabled={
+                isImportingLegacyGoals ||
+                isLoadingSavingsGoals ||
+                Boolean(savingsError)
+              }
+            >
+              {isImportingLegacyGoals
+                ? "Importing..."
+                : "Import into this account"}
+            </button>
+          </section>
+        )}
+
         {selectedGoal && (
           <div
             className="savings-modal-backdrop"
             onMouseDown={(event) => {
-              if (event.target === event.currentTarget) {
+              if (
+                !isSavingContribution &&
+                event.target === event.currentTarget
+              ) {
                 closeContributionForm();
               }
             }}
@@ -757,17 +883,21 @@ function Savings() {
                 )}
 
                 <div className="savings-form-actions">
-                  <button type="submit" className="primary-button">
-                    Confirm{" "}
-                    {contributionType === "deposit"
-                      ? "deposit"
-                      : "withdrawal"}
+                  <button
+                    type="submit"
+                    className="primary-button"
+                    disabled={isSavingContribution}
+                  >
+                    {isSavingContribution
+                      ? "Saving..."
+                      : `Confirm ${contributionType === "deposit" ? "deposit" : "withdrawal"}`}
                   </button>
 
                   <button
                     type="button"
                     className="secondary-button"
                     onClick={closeContributionForm}
+                    disabled={isSavingContribution}
                   >
                     Cancel
                   </button>
@@ -822,7 +952,7 @@ function Savings() {
                     .sort((a, b) => {
                       const dateOrder = b.date.localeCompare(a.date);
 
-                      return dateOrder || b.id.localeCompare(a.id);
+                      return dateOrder || Number(b.id) - Number(a.id);
                     })
                     .map((contribution) => (
                       <article
@@ -890,7 +1020,7 @@ function Savings() {
 
         <footer className="page-footer">
           <span>PesaTrack · Personal Finance</span>
-          <span>Savings goals saved in this browser</span>
+          <span>Savings goals and contributions sync with your account</span>
         </footer>
       </main>
     </div>

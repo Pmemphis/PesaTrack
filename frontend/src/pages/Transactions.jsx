@@ -2,6 +2,8 @@ import { useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 import "../App.css";
 import { useTransactions } from "../context/TransactionContext";
+import AccountPanel from "../components/AccountPanel";
+import { useAuth } from "../context/useAuth";
 
 const money = (amount) =>
   new Intl.NumberFormat("en-KE", {
@@ -33,6 +35,7 @@ function formatDate(dateString) {
 }
 
 function Transactions() {
+  const { user } = useAuth();
   const {
     transactions,
     deleteTransaction: removeTransaction,
@@ -44,6 +47,8 @@ function Transactions() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [sortOrder, setSortOrder] = useState("newest");
+  const [deletingId, setDeletingId] = useState(null);
+  const [deleteError, setDeleteError] = useState("");
 
   const categories = useMemo(
     () =>
@@ -113,7 +118,7 @@ function Transactions() {
     .filter((item) => item.type === "expense")
     .reduce((total, item) => total + (Number(item.amount) || 0), 0);
 
-  function handleDeleteTransaction(id) {
+  async function handleDeleteTransaction(id) {
     const transaction = transactions.find((item) => item.id === id);
 
     if (!transaction) return;
@@ -123,7 +128,17 @@ function Transactions() {
     );
 
     if (confirmed) {
-      removeTransaction(id);
+      setDeletingId(id);
+      setDeleteError("");
+
+      try {
+        await removeTransaction(id);
+      } catch (error) {
+        console.error("Transaction deletion failed:", error);
+        setDeleteError("Could not delete the transaction. Check your connection and try again.");
+      } finally {
+        setDeletingId(null);
+      }
     }
   }
 
@@ -198,14 +213,7 @@ function Transactions() {
             <p>Small steps today. Better finances tomorrow.</p>
           </div>
 
-          <div className="profile">
-            <div className="avatar">PM</div>
-            <div>
-              <strong>My Account</strong>
-              <span>Personal workspace</span>
-            </div>
-            <span className="profile-menu">•••</span>
-          </div>
+          <AccountPanel />
         </div>
       </aside>
 
@@ -216,8 +224,10 @@ function Transactions() {
           </div>
 
           <div className="topbar-right">
-            <span className="demo-badge">DEMO DATA</span>
-            <div className="avatar small-avatar">PM</div>
+            <span className="demo-badge">ACCOUNT DATA</span>
+            <div className="avatar small-avatar">
+              {[user?.first_name, user?.last_name].filter(Boolean).map((part) => part[0].toUpperCase()).join("") || user?.email?.[0]?.toUpperCase() || "?"}
+            </div>
           </div>
         </header>
 
@@ -366,6 +376,12 @@ function Transactions() {
             </button>
           </div>
 
+          {deleteError && (
+            <p className="form-error" role="alert">
+              {deleteError}
+            </p>
+          )}
+
           <div className="table-scroll">
             <table>
               <thead>
@@ -409,12 +425,15 @@ function Transactions() {
                       <button
                         type="button"
                         className="delete-button"
+                        disabled={deletingId !== null}
                         onClick={() =>
                           handleDeleteTransaction(transaction.id)
                         }
                         aria-label={`Delete ${transaction.name}`}
                       >
-                        Delete
+                        {String(deletingId) === String(transaction.id)
+                          ? "Deleting..."
+                          : "Delete"}
                       </button>
                     </td>
                   </tr>
@@ -433,9 +452,8 @@ function Transactions() {
           </div>
 
           <p className="demo-note">
-            Demo mode: transactions are shared across pages and saved in this
-            browser's local storage. They are not yet connected to a backend
-            or cloud database.
+            Transactions sync with your account and are available across your
+            signed-in pages.
           </p>
         </section>
 

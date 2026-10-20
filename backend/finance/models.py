@@ -5,6 +5,63 @@ from django.core.validators import MinValueValidator
 from decimal import Decimal
 
 
+class SocialIdentity(models.Model):
+    GOOGLE = "google"
+    GITHUB = "github"
+    PROVIDER_CHOICES = [
+        (GOOGLE, "Google"),
+        (GITHUB, "GitHub"),
+    ]
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="social_identities",
+    )
+    provider = models.CharField(max_length=16, choices=PROVIDER_CHOICES)
+    subject = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["provider", "subject"],
+                name="unique_social_provider_subject",
+            ),
+            models.UniqueConstraint(
+                fields=["user", "provider"],
+                name="unique_social_user_provider",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.provider} identity for {self.user_id}"
+
+
+class OAuthState(models.Model):
+    LOGIN = "login"
+    LINK = "link"
+    PURPOSE_CHOICES = [(LOGIN, "Sign in"), (LINK, "Link account")]
+
+    provider = models.CharField(max_length=16, choices=SocialIdentity.PROVIDER_CHOICES)
+    state_hash = models.CharField(max_length=64, unique=True)
+    purpose = models.CharField(max_length=8, choices=PURPOSE_CHOICES, default=LOGIN)
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name="oauth_states",
+    )
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    provider_subject = models.CharField(max_length=255, blank=True, default="")
+    completion_hash = models.CharField(max_length=64, blank=True, default="", db_index=True)
+    completion_expires_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+
 class Transaction(models.Model):
     INCOME = "income"
     EXPENSE = "expense"

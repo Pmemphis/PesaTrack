@@ -11,6 +11,8 @@ import Transactions from "./pages/Transactions";
 import Budgets from "./pages/Budgets";
 import Savings from "./pages/Savings";
 import Login from "./pages/Login";
+import OAuthCallback from "./pages/OAuthCallback";
+import { AuthProvider } from "./context/AuthProvider";
 
 import { TransactionProvider } from "./context/TransactionContext";
 
@@ -31,9 +33,12 @@ function App() {
   return (
     <BrowserRouter>
       <TransactionProvider>
+        <AuthProvider>
         <Routes>
           {/* Public login page */}
           <Route path="/login" element={<Login />} />
+          <Route path="/signup" element={<Login isSignup />} />
+          <Route path="/auth/callback" element={<OAuthCallback />} />
 
           {/* Protected application pages */}
           <Route
@@ -78,6 +83,7 @@ function App() {
             element={<Navigate to="/" replace />}
           />
         </Routes>
+        </AuthProvider>
       </TransactionProvider>
     </BrowserRouter>
   );

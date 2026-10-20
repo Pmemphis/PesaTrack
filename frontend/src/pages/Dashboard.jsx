@@ -2,15 +2,8 @@ import { useState } from "react";
 import { NavLink } from "react-router-dom";
 import "../App.css";
 import { useTransactions } from "../context/TransactionContext";
-
-const monthlyData = [
-  { month: "May", income: 45, expense: 25 },
-  { month: "Jun", income: 65, expense: 35 },
-  { month: "Jul", income: 55, expense: 40 },
-  { month: "Aug", income: 80, expense: 48 },
-  { month: "Sep", income: 70, expense: 38 },
-  { month: "Oct", income: 90, expense: 52 },
-];
+import AccountPanel from "../components/AccountPanel";
+import { useAuth } from "../context/useAuth";
 
 const money = (amount) =>
   new Intl.NumberFormat("en-KE", {
@@ -18,6 +11,67 @@ const money = (amount) =>
     currency: "KES",
     maximumFractionDigits: 0,
   }).format(amount);
+
+const compactMoney = (amount) =>
+  new Intl.NumberFormat("en-KE", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(amount);
+
+function getMonthKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getTransactionMonth(date) {
+  if (!date) return "";
+  if (/^\d{4}-\d{2}/.test(date)) return date.slice(0, 7);
+
+  const parsedDate = new Date(date);
+  return Number.isNaN(parsedDate.getTime()) ? "" : getMonthKey(parsedDate);
+}
+
+function getMonthLabel(monthKey) {
+  const [year, month] = monthKey.split("-").map(Number);
+  return new Date(year, month - 1, 1).toLocaleDateString("en-KE", {
+    month: "short",
+    year: "2-digit",
+  });
+}
+
+function getChartAxisMaximum(value) {
+  if (value <= 0) return 1000;
+
+  const roughStep = value / 4;
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const fraction = roughStep / magnitude;
+  const step =
+    fraction <= 1 ? magnitude : fraction <= 2 ? 2 * magnitude : fraction <= 5 ? 5 * magnitude : 10 * magnitude;
+
+  return Math.ceil(value / (step * 4)) * step * 4;
+}
+
+function userInitials(user) {
+  return [user?.first_name, user?.last_name]
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase())
+    .join("") || user?.email?.[0]?.toUpperCase() || "?";
+}
+
+function getCategoryIcon(category) {
+  const icons = {
+    food: "🍲",
+    transport: "🚗",
+    utilities: "📱",
+    rent: "🏠",
+    shopping: "🛍️",
+    health: "❤️",
+    education: "📚",
+    business: "💼",
+    entertainment: "🎬",
+  };
+
+  return icons[category.trim().toLowerCase()] || "📊";
+}
 
 const formatDate = (date) => {
   if (!date) return "—";
@@ -50,8 +104,14 @@ const navigation = [
 ];
 
 function Dashboard() {
+  const { user } = useAuth();
   const {
     transactions,
+    isLoadingTransactions,
+    transactionError,
+    budgets,
+    isLoadingBudgets,
+    budgetError,
     addTransaction: createTransaction,
     deleteTransaction: removeTransaction,
   } = useTransactions();
@@ -62,6 +122,10 @@ function Dashboard() {
   const [type, setType] = useState("expense");
   const [category, setCategory] = useState("Food");
   const [formError, setFormError] = useState("");
+  const [isSavingTransaction, setIsSavingTransaction] = useState(false);
+  const [deletingTransactionId, setDeletingTransactionId] = useState(null);
+  const [transactionActionError, setTransactionActionError] = useState("");
+  const [now] = useState(() => new Date());
 
   const totalIncome = transactions
     .filter((transaction) => transaction.type === "income")
@@ -76,7 +140,62 @@ function Dashboard() {
   const savingsRate =
     totalIncome > 0 ? (netSavings / totalIncome) * 100 : 0;
 
-  function handleAddTransaction(event) {
+  const currentMonthKey = getMonthKey(now);
+  const currentMonthBudgets = budgets.filter(
+    (budget) => budget.month === currentMonthKey
+  );
+  const currentMonthExpenses = transactions.filter(
+    (transaction) =>
+      transaction.type === "expense" &&
+      getTransactionMonth(transaction.date) === currentMonthKey
+  );
+  const getBudgetedSpending = (categoryName) =>
+    currentMonthExpenses
+      .filter(
+        (transaction) =>
+          transaction.category.trim().toLowerCase() ===
+          categoryName.trim().toLowerCase()
+      )
+      .reduce((total, transaction) => total + Number(transaction.amount), 0);
+  const totalMonthlyBudget = currentMonthBudgets.reduce(
+    (total, budget) => total + Number(budget.amount),
+    0
+  );
+  const totalBudgetedSpending = currentMonthBudgets.reduce(
+    (total, budget) => total + getBudgetedSpending(budget.category),
+    0
+  );
+  const budgetUsage =
+    totalMonthlyBudget > 0
+      ? (totalBudgetedSpending / totalMonthlyBudget) * 100
+      : 0;
+  const topBudgets = [...currentMonthBudgets]
+    .sort((a, b) => Number(b.amount) - Number(a.amount))
+    .slice(0, 3);
+
+  const cashFlow = Array.from({ length: 6 }, (_, index) => {
+    const monthDate = new Date(now.getFullYear(), now.getMonth() - 5 + index, 1);
+    const key = getMonthKey(monthDate);
+
+    return { key, label: getMonthLabel(key), income: 0, expense: 0 };
+  });
+  const cashFlowByMonth = new Map(cashFlow.map((month) => [month.key, month]));
+
+  transactions.forEach((transaction) => {
+    const month = cashFlowByMonth.get(getTransactionMonth(transaction.date));
+    if (month && (transaction.type === "income" || transaction.type === "expense")) {
+      month[transaction.type] += Number(transaction.amount) || 0;
+    }
+  });
+
+  const chartAxisMaximum = getChartAxisMaximum(
+    Math.max(0, ...cashFlow.flatMap((month) => [month.income, month.expense]))
+  );
+  const chartAxisLabels = [4, 3, 2, 1, 0].map((step) =>
+    compactMoney((chartAxisMaximum / 4) * step)
+  );
+
+  async function handleAddTransaction(event) {
     event.preventDefault();
 
     const trimmedName = name.trim();
@@ -92,30 +211,51 @@ function Dashboard() {
       return;
     }
 
-    createTransaction({
-      name: trimmedName,
-      category,
-      date: new Date().toLocaleDateString("en-CA"),
-      amount: numericAmount,
-      type,
-      icon: type === "income" ? "💰" : "💳",
-    });
+    setIsSavingTransaction(true);
 
-    setName("");
-    setAmount("");
-    setType("expense");
-    setCategory("Food");
-    setFormError("");
-    setShowForm(false);
+    try {
+      await createTransaction({
+        name: trimmedName,
+        category,
+        date: new Date().toLocaleDateString("en-CA"),
+        amount: numericAmount,
+        type,
+        icon: type === "income" ? "💰" : "💳",
+      });
+
+      setName("");
+      setAmount("");
+      setType("expense");
+      setCategory("Food");
+      setFormError("");
+      setShowForm(false);
+    } catch (error) {
+      console.error("Transaction save failed:", error);
+      setFormError("Could not save the transaction. Check your connection and try again.");
+    } finally {
+      setIsSavingTransaction(false);
+    }
   }
 
-  function handleDeleteTransaction(id) {
+  async function handleDeleteTransaction(id) {
     const confirmed = window.confirm(
       "Are you sure you want to delete this transaction?"
     );
 
     if (confirmed) {
-      removeTransaction(id);
+      setDeletingTransactionId(id);
+      setTransactionActionError("");
+
+      try {
+        await removeTransaction(id);
+      } catch (error) {
+        console.error("Transaction deletion failed:", error);
+        setTransactionActionError(
+          "Could not delete the transaction. Check your connection and try again."
+        );
+      } finally {
+        setDeletingTransactionId(null);
+      }
     }
   }
 
@@ -154,14 +294,7 @@ function Dashboard() {
             <p>Small steps today. Better finances tomorrow.</p>
           </div>
 
-          <div className="profile">
-            <div className="avatar">PM</div>
-            <div>
-              <strong>My Account</strong>
-              <span>Personal workspace</span>
-            </div>
-            <span className="profile-menu">•••</span>
-          </div>
+          <AccountPanel />
         </div>
       </aside>
 
@@ -172,7 +305,7 @@ function Dashboard() {
           </div>
 
           <div className="topbar-right">
-            <span className="demo-badge">DEMO DATA</span>
+            <span className="demo-badge">ACCOUNT DATA</span>
             <button
               type="button"
               className="icon-button"
@@ -180,7 +313,7 @@ function Dashboard() {
             >
               ♧
             </button>
-            <div className="avatar small-avatar">PM</div>
+            <div className="avatar small-avatar">{userInitials(user)}</div>
           </div>
         </header>
 
@@ -306,12 +439,17 @@ function Dashboard() {
                     setShowForm(false);
                     setFormError("");
                   }}
+                  disabled={isSavingTransaction}
                 >
                   Cancel
                 </button>
 
-                <button type="submit" className="primary-button">
-                  Save transaction
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={isSavingTransaction}
+                >
+                  {isSavingTransaction ? "Saving..." : "Save transaction"}
                 </button>
               </div>
             </form>
@@ -374,7 +512,7 @@ function Dashboard() {
             <div className="panel-heading">
               <div>
                 <h3>Cash flow</h3>
-                <p className="muted">Illustrative monthly trends</p>
+                <p className="muted">Income and expenses by month</p>
               </div>
               <span className="period-button">Last 6 months</span>
             </div>
@@ -390,105 +528,129 @@ function Dashboard() {
 
             <div className="chart">
               <div className="y-axis">
-                <span>10k</span>
-                <span>7.5k</span>
-                <span>5k</span>
-                <span>2.5k</span>
-                <span>0</span>
+                {chartAxisLabels.map((label, index) => (
+                  <span key={`${label}-${index}`}>{label}</span>
+                ))}
               </div>
 
               <div className="chart-plot">
-                {monthlyData.map((item) => (
-                  <div className="chart-column" key={item.month}>
+                {cashFlow.map((item) => (
+                  <div className="chart-column" key={item.key}>
                     <div className="bar-pair">
                       <div
                         className="bar income-bar"
-                        style={{ height: `${item.income}%` }}
-                        title="Illustrative income"
+                        style={{
+                          height: `${(item.income / chartAxisMaximum) * 100}%`,
+                          minHeight: item.income > 0 ? undefined : 0,
+                        }}
+                        title={`${item.label} income: ${money(item.income)}`}
                       />
                       <div
                         className="bar expense-bar"
-                        style={{ height: `${item.expense}%` }}
-                        title="Illustrative expenses"
+                        style={{
+                          height: `${(item.expense / chartAxisMaximum) * 100}%`,
+                          minHeight: item.expense > 0 ? undefined : 0,
+                        }}
+                        title={`${item.label} expenses: ${money(item.expense)}`}
                       />
                     </div>
-                    <span className="month-label">{item.month}</span>
+                    <span className="month-label">{item.label}</span>
                   </div>
                 ))}
               </div>
             </div>
+
+            {isLoadingTransactions && (
+              <p className="muted">Loading your cash flow...</p>
+            )}
+            {!isLoadingTransactions && transactionError && (
+              <p className="form-error" role="alert">
+                Could not load cash flow. Check your connection and refresh.
+              </p>
+            )}
+            {!isLoadingTransactions &&
+              !transactionError &&
+              transactions.length === 0 && (
+                <p className="muted">Record a transaction to see your cash flow.</p>
+              )}
           </article>
 
           <article className="panel budget-panel">
             <div className="panel-heading">
               <div>
                 <h3>Budget overview</h3>
-                <p className="muted">Illustrative monthly budget</p>
+                <p className="muted">{getMonthLabel(currentMonthKey)}</p>
               </div>
-              <button
-                type="button"
-                className="more-button"
-                aria-label="More budget options"
-              >
-                •••
-              </button>
             </div>
 
-            <div className="budget-total">
-              <div>
-                <span className="muted">Sample spending</span>
-                <h2>{money(14650)}</h2>
-              </div>
-              <span className="budget-limit">of {money(25000)}</span>
-            </div>
+            {isLoadingBudgets ? (
+              <p className="muted">Loading this month’s budgets...</p>
+            ) : budgetError ? (
+              <p className="form-error" role="alert">
+                Could not load budgets. Check your connection and refresh.
+              </p>
+            ) : currentMonthBudgets.length === 0 ? (
+              <p className="muted">
+                No budgets for this month yet. Set one to track category spending.
+              </p>
+            ) : (
+              <>
+                <div className="budget-total">
+                  <div>
+                    <span className="muted">Spent in budgeted categories</span>
+                    <h2>{money(totalBudgetedSpending)}</h2>
+                  </div>
+                  <span className="budget-limit">of {money(totalMonthlyBudget)}</span>
+                </div>
 
-            <div className="progress-track">
-              <div
-                className="progress-fill"
-                style={{ width: "58.6%" }}
-              />
-            </div>
-
-            <p className="budget-caption">Sample budget usage: 58.6%</p>
-
-            <div className="budget-item">
-              <div className="budget-item-top">
-                <span>🍲 Food & groceries</span>
-                <span>{money(6200)}</span>
-              </div>
-              <div className="progress-track">
                 <div
-                  className="category-fill food-fill"
-                  style={{ width: "62%" }}
-                />
-              </div>
-            </div>
+                  className="progress-track"
+                  role="progressbar"
+                  aria-label="Overall monthly budget usage"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.min(100, Math.round(budgetUsage))}
+                >
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${Math.min(100, budgetUsage)}%` }}
+                  />
+                </div>
 
-            <div className="budget-item">
-              <div className="budget-item-top">
-                <span>🚗 Transport</span>
-                <span>{money(2850)}</span>
-              </div>
-              <div className="progress-track">
-                <div
-                  className="category-fill transport-fill"
-                  style={{ width: "47.5%" }}
-                />
-              </div>
-            </div>
+                <p className="budget-caption">
+                  {Math.round(budgetUsage)}% of monthly limits used
+                </p>
 
-            <div className="budget-item">
-              <div className="budget-item-top">
-                <span>📱 Utilities</span>
-                <span>{money(2100)}</span>
-              </div>
-              <div className="progress-track">
-                <div
-                  className="category-fill utilities-fill"
-                  style={{ width: "70%" }}
-                />
-              </div>
-            </div>
+                {topBudgets.map((budget, index) => {
+                  const spent = getBudgetedSpending(budget.category);
+                  const limit = Number(budget.amount) || 0;
+                  const progress = limit > 0 ? (spent / limit) * 100 : 0;
+                  const colors = ["#f1b45f", "#5ea9e9", "#25b995"];
+
+                  return (
+                    <div className="budget-item" key={budget.id}>
+                      <div className="budget-item-top">
+                        <span>
+                          {getCategoryIcon(budget.category)} {budget.category}
+                        </span>
+                        <span>
+                          {money(spent)} / {money(limit)}
+                        </span>
+                      </div>
+                      <div className="progress-track">
+                        <div
+                          className="category-fill"
+                          style={{
+                            width: `${Math.min(100, progress)}%`,
+                            backgroundColor: colors[index],
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </>
+            )}
 
             <NavLink className="view-all" to="/budgets">
               Manage budgets →
@@ -509,6 +671,12 @@ function Dashboard() {
               View all →
             </NavLink>
           </div>
+
+          {transactionActionError && (
+            <p className="form-error" role="alert">
+              {transactionActionError}
+            </p>
+          )}
 
           <div className="table-scroll">
             <table>
@@ -553,13 +721,17 @@ function Dashboard() {
                       <button
                         type="button"
                         className="delete-button"
+                        disabled={deletingTransactionId !== null}
                         onClick={() =>
                           handleDeleteTransaction(transaction.id)
                         }
                         aria-label={`Delete ${transaction.name}`}
                         title="Delete transaction"
                       >
-                        Delete
+                        {String(deletingTransactionId) ===
+                        String(transaction.id)
+                          ? "Deleting..."
+                          : "Delete"}
                       </button>
                     </td>
                   </tr>
@@ -577,9 +749,7 @@ function Dashboard() {
           </div>
 
           <p className="demo-note">
-            Demo mode: transactions are shared across pages and saved in this
-            browser's local storage. They are not yet connected to a backend
-            or cloud database.
+            Transactions and budgets are synced with your account.
           </p>
         </section>
 
@@ -587,15 +757,12 @@ function Dashboard() {
           <div className="panel-heading">
             <div>
               <h3>Savings goals</h3>
-              <p className="muted">
-                We'll build goal tracking in a later step.
-              </p>
+              <p className="muted">Track progress toward your savings targets.</p>
             </div>
           </div>
 
           <p className="muted">
-            Your savings goals will let you set targets, record contributions,
-            and track progress toward what matters to you.
+            Review your goals and contributions on the Savings page.
           </p>
 
           <NavLink className="view-all" to="/savings">

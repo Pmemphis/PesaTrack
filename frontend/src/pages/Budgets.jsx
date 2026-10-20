@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 import { NavLink } from "react-router-dom";
 import "../App.css";
 import { useTransactions } from "../context/TransactionContext";
+import AccountPanel from "../components/AccountPanel";
 
 const CATEGORY_OPTIONS = [
   "Food",
@@ -21,9 +22,10 @@ const CATEGORY_OPTIONS = [
 function getCurrentMonth() {
   const now = new Date();
 
-  return `${now.getFullYear()}-${String(
-    now.getMonth() + 1
-  ).padStart(2, "0")}`;
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}`;
 }
 
 function formatMoney(value) {
@@ -35,37 +37,34 @@ function formatMoney(value) {
 }
 
 function formatMonth(month) {
-  if (!month || !/^\d{4}-\d{2}$/.test(month)) {
+  if (!month || !/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
     return month || "";
   }
 
   const [year, monthNumber] = month.split("-").map(Number);
 
-  return new Date(year, monthNumber - 1, 1).toLocaleDateString(
-    "en-KE",
-    {
-      month: "long",
-      year: "numeric",
-    }
-  );
+  return new Date(year, monthNumber - 1, 1).toLocaleDateString("en-KE", {
+    month: "long",
+    year: "numeric",
+  });
 }
 
 function getTransactionMonth(transaction) {
   if (!transaction.date) return "";
 
-  // Preferred format: YYYY-MM-DD.
+  // Prefer the date portion directly to avoid timezone shifts.
   if (/^\d{4}-\d{2}-\d{2}/.test(transaction.date)) {
     return transaction.date.slice(0, 7);
   }
 
-  // Fallback for older date formats.
   const date = new Date(transaction.date);
 
   if (Number.isNaN(date.getTime())) return "";
 
-  return `${date.getFullYear()}-${String(
-    date.getMonth() + 1
-  ).padStart(2, "0")}`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(
+    2,
+    "0"
+  )}`;
 }
 
 function getCategoryKey(category) {
@@ -96,6 +95,8 @@ function Budgets() {
     budgets = [],
     saveBudget,
     deleteBudget,
+    isLoadingBudgets = false,
+    budgetError = "",
   } = useTransactions();
 
   const [selectedMonth, setSelectedMonth] = useState(getCurrentMonth());
@@ -103,6 +104,8 @@ function Budgets() {
   const [amount, setAmount] = useState("");
   const [editingId, setEditingId] = useState(null);
   const [error, setError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
 
   const monthlyBudgets = useMemo(() => {
     return budgets
@@ -153,7 +156,7 @@ function Budgets() {
     0
   );
 
-  // A negative value means spending exceeded the combined budget limits.
+  // This measures the remaining limits of categories that have budgets.
   const totalRemaining = totalBudget - budgetedCategorySpending;
 
   const overBudgetCount = monthlyBudgets.filter(
@@ -173,7 +176,7 @@ function Budgets() {
     resetForm();
   }
 
-  function handleSubmit(event) {
+  async function handleSubmit(event) {
     event.preventDefault();
     setError("");
 
@@ -195,7 +198,7 @@ function Budgets() {
       return;
     }
 
-    if (!selectedMonth || !/^\d{4}-\d{2}$/.test(selectedMonth)) {
+    if (!selectedMonth || !/^\d{4}-(0[1-9]|1[0-2])$/.test(selectedMonth)) {
       setError("Please select a valid budget month.");
       return;
     }
@@ -204,7 +207,7 @@ function Budgets() {
       (budget) =>
         getCategoryKey(budget.category) ===
           getCategoryKey(cleanCategory) &&
-        budget.id !== editingId
+        String(budget.id) !== String(editingId)
     );
 
     if (duplicate) {
@@ -214,13 +217,33 @@ function Budgets() {
       return;
     }
 
-    saveBudget({
-      category: cleanCategory,
-      amount: numericAmount,
-      month: selectedMonth,
-    });
+    setIsSaving(true);
 
-    resetForm();
+    try {
+      await saveBudget({
+        ...(editingId !== null ? { id: editingId } : {}),
+        category: cleanCategory,
+        amount: numericAmount,
+        month: selectedMonth,
+      });
+
+      resetForm();
+    } catch (apiError) {
+      console.error("Budget save failed:", apiError);
+
+      const serverMessage =
+        apiError?.message && apiError.message.length < 300
+          ? apiError.message
+          : "";
+
+      setError(
+        serverMessage
+          ? `Could not save budget: ${serverMessage}`
+          : "Could not save budget. Check your connection and try again."
+      );
+    } finally {
+      setIsSaving(false);
+    }
   }
 
   function handleEdit(budget) {
@@ -235,7 +258,7 @@ function Budgets() {
     });
   }
 
-  function handleDelete(budget) {
+  async function handleDelete(budget) {
     const confirmed = window.confirm(
       `Delete the ${budget.category} budget for ${formatMonth(
         budget.month
@@ -244,10 +267,20 @@ function Budgets() {
 
     if (!confirmed) return;
 
-    deleteBudget(budget.id);
+    setDeletingId(budget.id);
+    setError("");
 
-    if (editingId === budget.id) {
-      resetForm();
+    try {
+      await deleteBudget(budget.id);
+
+      if (String(editingId) === String(budget.id)) {
+        resetForm();
+      }
+    } catch (apiError) {
+      console.error("Budget deletion failed:", apiError);
+      setError("Could not delete this budget. Please try again.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -299,14 +332,7 @@ function Budgets() {
           </NavLink>
         </nav>
 
-        <div className="sidebar-footer">
-          <div className="sidebar-avatar">PT</div>
-
-          <div>
-            <strong>My Finances</strong>
-            <span>Kenya · KES</span>
-          </div>
-        </div>
+        <AccountPanel />
       </aside>
 
       <main className="main-content">
@@ -381,9 +407,9 @@ function Budgets() {
           <div className="panel budget-form-panel">
             <div className="panel-header">
               <div>
-                <h2>{editingId ? "Edit budget" : "Create a budget"}</h2>
+                <h2>{editingId !== null ? "Edit budget" : "Create a budget"}</h2>
                 <p>
-                  {editingId
+                  {editingId !== null
                     ? "Update this category's spending limit."
                     : "Choose a category and set your monthly limit."}
                 </p>
@@ -440,29 +466,36 @@ function Budgets() {
                   id="budget-form-month"
                   type="month"
                   value={selectedMonth}
-                  onChange={(event) =>
-                    handleMonthChange(event.target.value)
-                  }
+                  onChange={(event) => handleMonthChange(event.target.value)}
                   required
                 />
               </div>
 
-              {error && (
+              {(error || budgetError) && (
                 <p className="budget-error" role="alert">
-                  {error}
+                  {error || "There is a problem with your budgets. Please refresh and try again."}
                 </p>
               )}
 
               <div className="budget-form-actions">
-                <button type="submit" className="primary-button">
-                  {editingId ? "Save changes" : "Add budget"}
+                <button
+                  type="submit"
+                  className="primary-button"
+                  disabled={isSaving}
+                >
+                  {isSaving
+                    ? "Saving..."
+                    : editingId !== null
+                    ? "Save changes"
+                    : "Add budget"}
                 </button>
 
-                {editingId && (
+                {editingId !== null && (
                   <button
                     type="button"
                     className="secondary-button"
                     onClick={resetForm}
+                    disabled={isSaving}
                   >
                     Cancel
                   </button>
@@ -484,14 +517,27 @@ function Budgets() {
               </span>
             </div>
 
-            {monthlyBudgets.length === 0 ? (
+            {isLoadingBudgets ? (
+              <div className="budget-empty-state">
+                <div className="empty-state-icon">⏳</div>
+                <h3>Loading budgets...</h3>
+                <p>Fetching your saved budgets from the server.</p>
+              </div>
+            ) : budgetError ? (
+              <div className="budget-empty-state">
+                <div className="empty-state-icon">⚠️</div>
+                <h3>Could not load budgets</h3>
+                <p>
+                  Check your connection and login, then refresh the page.
+                </p>
+              </div>
+            ) : monthlyBudgets.length === 0 ? (
               <div className="budget-empty-state">
                 <div className="empty-state-icon">🎯</div>
                 <h3>No budgets for this month yet</h3>
                 <p>
-                  Create your first category budget to start tracking
-                  spending. Expense transactions will update progress
-                  automatically.
+                  Create your first category budget to start tracking spending.
+                  Expense transactions will update progress automatically.
                 </p>
               </div>
             ) : (
@@ -535,26 +581,18 @@ function Budgets() {
                         aria-label={`${budget.category} budget usage`}
                         aria-valuemin={0}
                         aria-valuemax={100}
-                        aria-valuenow={Math.min(
-                          100,
-                          Math.round(progress)
-                        )}
+                        aria-valuenow={Math.min(100, Math.round(progress))}
                       >
                         <div
                           className={`budget-progress-fill ${status}`}
                           style={{
-                            width: `${Math.min(
-                              100,
-                              Math.max(0, progress)
-                            )}%`,
+                            width: `${Math.min(100, Math.max(0, progress))}%`,
                           }}
                         />
                       </div>
 
                       <div className="budget-item-footer">
-                        <span>
-                          {Math.round(progress)}% used
-                        </span>
+                        <span>{Math.round(progress)}% used</span>
 
                         <strong
                           className={remaining < 0 ? "negative-value" : ""}
@@ -570,6 +608,7 @@ function Budgets() {
                           type="button"
                           className="text-button"
                           onClick={() => handleEdit(budget)}
+                          disabled={deletingId !== null || isSaving}
                         >
                           Edit limit
                         </button>
@@ -578,8 +617,11 @@ function Budgets() {
                           type="button"
                           className="text-button delete-text-button"
                           onClick={() => handleDelete(budget)}
+                          disabled={deletingId !== null || isSaving}
                         >
-                          Delete
+                          {String(deletingId) === String(budget.id)
+                            ? "Deleting..."
+                            : "Delete"}
                         </button>
                       </div>
                     </article>
@@ -596,16 +638,16 @@ function Budgets() {
           <div>
             <h3>A simple budgeting rule</h3>
             <p>
-              Set realistic limits based on your income and expenses.
-              Record expenses with consistent category names so PesaTrack
-              can match them to the correct budgets.
+              Set realistic limits based on your income and expenses. Record
+              expenses with consistent category names so PesaTrack can match
+              them to the correct budgets.
             </p>
           </div>
         </section>
 
         <footer className="page-footer">
           <span>PesaTrack · Personal Finance</span>
-          <span>Budgets saved in this browser</span>
+          <span>Budgets synced with your account</span>
         </footer>
       </main>
     </div>
