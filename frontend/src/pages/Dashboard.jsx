@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 import "../App.css";
 import { useTransactions } from "../context/TransactionContext";
@@ -20,6 +20,15 @@ const compactMoney = (amount) =>
 
 function getMonthKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
+}
+
+function getTimeGreeting(date) {
+  const hour = date.getHours();
+
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
+  if (hour >= 17 && hour < 21) return "Good evening";
+  return "Good night";
 }
 
 function getTransactionMonth(date) {
@@ -125,7 +134,15 @@ function Dashboard() {
   const [isSavingTransaction, setIsSavingTransaction] = useState(false);
   const [deletingTransactionId, setDeletingTransactionId] = useState(null);
   const [transactionActionError, setTransactionActionError] = useState("");
-  const [now] = useState(() => new Date());
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const displayName =
+    user?.first_name?.trim() || user?.username?.split("@")[0] || "there";
 
   const totalIncome = transactions
     .filter((transaction) => transaction.type === "income")
@@ -320,7 +337,9 @@ function Dashboard() {
         <section className="page-heading">
           <div>
             <p className="eyebrow">YOUR FINANCIAL OVERVIEW</p>
-            <h1>Good morning 👋</h1>
+            <h1>
+              {getTimeGreeting(now)}, {displayName} 👋
+            </h1>
             <p className="muted">
               Here's what's happening with your money.
             </p>
