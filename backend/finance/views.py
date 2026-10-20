@@ -9,15 +9,15 @@ from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from django.conf import settings
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 from django.contrib.auth import authenticate, get_user_model
 from rest_framework import status, viewsets
-from rest_framework.authtoken.models import Token
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
+from rest_framework.throttling import ScopedRateThrottle
 from django.http import HttpResponseRedirect
 from rest_framework.exceptions import ValidationError
 
@@ -29,6 +29,7 @@ from .models import (
     SocialIdentity,
     OAuthState,
 )
+from .authentication import issue_auth_token
 from .serializers import (
     TransactionSerializer,
     BudgetSerializer,
@@ -42,8 +43,22 @@ from .serializers import (
 User = get_user_model()
 
 
+class HealthCheckView(APIView):
+    permission_classes = [AllowAny]
+    authentication_classes = []
+    throttle_classes = []
+
+    def get(self, request):
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        return Response({"status": "ok"})
+
+
 class RegistrationView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "registration"
 
     def post(self, request):
         serializer = RegistrationSerializer(data=request.data)
@@ -57,6 +72,8 @@ class RegistrationView(APIView):
 
 class LoginView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "login"
 
     def post(self, request):
         identifier = str(request.data.get("username", "")).strip()
@@ -74,7 +91,7 @@ class LoginView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        token, _ = Token.objects.get_or_create(user=user)
+        token = issue_auth_token(user)
         return Response({"token": token.key})
 
 
@@ -189,6 +206,8 @@ class OAuthProvidersView(APIView):
 
 class OAuthStartView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "oauth"
 
     def get(self, request, provider):
         config = OAUTH_PROVIDERS[provider]
@@ -205,6 +224,8 @@ class OAuthStartView(APIView):
 
 class OAuthLinkStartView(APIView):
     permission_classes = [IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "oauth"
 
     def post(self, request, provider):
         if not oauth_is_configured(provider):
@@ -405,6 +426,8 @@ def link_social_identity(user, provider, subject):
 
 class OAuthCallbackView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "oauth"
 
     def get(self, request, provider):
         frontend = settings.FRONTEND_PUBLIC_URL.rstrip("/")
@@ -453,7 +476,7 @@ class OAuthCallbackView(APIView):
                 )
 
             user = get_or_create_oauth_user(provider, subject, email, name)
-            token, _ = Token.objects.get_or_create(user=user)
+            token = issue_auth_token(user)
             return HttpResponseRedirect(f"{frontend}/auth/callback/#token={token.key}")
         except OAuthAccountConflict:
             error = "identity_conflict" if state_record.purpose == OAuthState.LINK else "account_exists"

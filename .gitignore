@@ -2,11 +2,13 @@
 .env
 .env.*
 !.env.example
+!.env.staging
 
 # Python
 __pycache__/
 *.py[cod]
 *.sqlite3
+backend/staticfiles/
 .venv/
 venv/
 

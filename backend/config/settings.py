@@ -3,6 +3,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management.utils import get_random_secret_key
+import dj_database_url
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
@@ -28,9 +29,12 @@ if not SECRET_KEY:
 if not DEBUG and len(SECRET_KEY) < 50:
     raise ImproperlyConfigured("Use a generated SECRET_KEY with at least 50 characters in production.")
 
+fly_app_name = os.getenv("FLY_APP_NAME", "").strip()
 ALLOWED_HOSTS = env_list(
     "ALLOWED_HOSTS",
-    "localhost,127.0.0.1,testserver" if DEBUG else "",
+    "localhost,127.0.0.1,testserver"
+    if DEBUG
+    else f"{fly_app_name}.fly.dev" if fly_app_name else "",
 )
 if not DEBUG and not ALLOWED_HOSTS:
     raise ImproperlyConfigured("Set ALLOWED_HOSTS when DJANGO_DEBUG is false.")
@@ -55,6 +59,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "corsheaders.middleware.CorsMiddleware",
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -86,16 +91,26 @@ WSGI_APPLICATION = 'config.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": os.getenv("DB_NAME"),
-        "USER": os.getenv("DB_USER"),
-        "PASSWORD": os.getenv("DB_PASSWORD"),
-        "HOST": os.getenv("DB_HOST", "127.0.0.1"),
-        "PORT": os.getenv("DB_PORT", "5432"),
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=not DEBUG,
+        )
     }
-}
+else:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": os.getenv("DB_NAME"),
+            "USER": os.getenv("DB_USER"),
+            "PASSWORD": os.getenv("DB_PASSWORD"),
+            "HOST": os.getenv("DB_HOST", "127.0.0.1"),
+            "PORT": os.getenv("DB_PORT", "5432"),
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
@@ -132,6 +147,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
 STATIC_URL = 'static/'
+STATIC_ROOT = BASE_DIR / "staticfiles"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}
 
 
 # Email
@@ -162,9 +182,37 @@ REST_FRAMEWORK = {
         "rest_framework.permissions.IsAuthenticated",
     ],
     "DEFAULT_AUTHENTICATION_CLASSES": [
-        "rest_framework.authentication.TokenAuthentication",
+        "finance.authentication.ExpiringTokenAuthentication",
         "rest_framework.authentication.SessionAuthentication",
     ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",
+        "rest_framework.throttling.UserRateThrottle",
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "120/hour",
+        "user": "1200/hour",
+        "login": "5/minute",
+        "registration": "5/hour",
+        "oauth": "20/hour",
+    },
+    "NUM_PROXIES": 1 if not DEBUG else 0,
+}
+
+TOKEN_TTL_DAYS = int(os.getenv("TOKEN_TTL_DAYS", "30"))
+if TOKEN_TTL_DAYS < 1:
+    raise ImproperlyConfigured("TOKEN_TTL_DAYS must be at least 1.")
+
+# Database-backed cache entries are shared by all running Fly Machines.
+CACHES = {
+    "default": {
+        "BACKEND": (
+            "django.core.cache.backends.db.DatabaseCache"
+            if not DEBUG
+            else "django.core.cache.backends.locmem.LocMemCache"
+        ),
+        "LOCATION": os.getenv("CACHE_TABLE", "django_cache"),
+    }
 }
 
 CORS_ALLOWED_ORIGINS = env_list(

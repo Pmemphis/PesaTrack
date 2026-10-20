@@ -31,6 +31,10 @@ export async function apiRequest(endpoint, options = {}) {
 
   if (!response.ok) {
     const data = await response.json().catch(() => null);
+    if (response.status === 401 && token && localStorage.getItem("pesatrack_token") === token) {
+      localStorage.removeItem("pesatrack_token");
+      window.dispatchEvent(new Event("pesatrack-auth-change"));
+    }
     throw new Error(apiErrorMessage(data, `API request failed: ${response.status}`));
   }
 

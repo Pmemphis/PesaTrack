@@ -1,5 +1,9 @@
 from django.contrib.auth import get_user_model
+from django.conf import settings
 from django.test import override_settings
+from django.utils import timezone
+from datetime import timedelta
+from django.core.cache import cache
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlparse
 from rest_framework.authtoken.models import Token
@@ -220,6 +224,9 @@ class FinanceAPITests(APITestCase):
 
 
 class AuthenticationAPITests(APITestCase):
+    def setUp(self):
+        cache.clear()
+
     def test_social_link_start_requires_authentication(self):
         with override_settings(
             GOOGLE_CLIENT_ID="google-test-id",
@@ -496,3 +503,50 @@ class AuthenticationAPITests(APITestCase):
         response = self.client.post("/api/logout/")
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(Token.objects.filter(pk=token.pk).exists())
+
+    def test_expired_token_is_rejected_and_removed(self):
+        user = get_user_model().objects.create_user(username="expired", password="test-password")
+        token = Token.objects.create(user=user)
+        Token.objects.filter(pk=token.pk).update(
+            created=timezone.now() - timedelta(days=settings.TOKEN_TTL_DAYS + 1)
+        )
+        self.client.credentials(HTTP_AUTHORIZATION=f"Token {token.key}")
+
+        response = self.client.get("/api/me/")
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertFalse(Token.objects.filter(pk=token.pk).exists())
+
+    def test_login_replaces_an_expired_token(self):
+        user = get_user_model().objects.create_user(
+            username="renew", email="renew@example.com", password="LongPass!92xyz"
+        )
+        old_token = Token.objects.create(user=user)
+        Token.objects.filter(pk=old_token.pk).update(
+            created=timezone.now() - timedelta(days=settings.TOKEN_TTL_DAYS + 1)
+        )
+
+        response = self.client.post(
+            "/api/token/",
+            {"username": user.email, "password": "LongPass!92xyz"},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertNotEqual(response.data["token"], old_token.key)
+        self.assertEqual(Token.objects.filter(user=user).count(), 1)
+
+    def test_login_is_rate_limited(self):
+        responses = [
+            self.client.post(
+                "/api/token/",
+                {"username": "wrong", "password": "wrong"},
+                format="json",
+            )
+            for _ in range(6)
+        ]
+
+        self.assertTrue(
+            all(response.status_code == status.HTTP_400_BAD_REQUEST for response in responses[:5])
+        )
+        self.assertEqual(responses[5].status_code, status.HTTP_429_TOO_MANY_REQUESTS)

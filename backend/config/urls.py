@@ -2,6 +2,7 @@
 from django.contrib import admin
 from django.urls import path, include
 from finance.views import (
+    HealthCheckView,
     CurrentUserView,
     LoginView,
     LogoutView,
@@ -14,6 +15,7 @@ from finance.views import (
 )
 
 urlpatterns = [
+    path("api/health/", HealthCheckView.as_view(), name="health-check"),
     path("admin/", admin.site.urls),
     path("api/token/", LoginView.as_view(), name="api-token"),
     path("api/register/", RegistrationView.as_view(), name="api-register"),
